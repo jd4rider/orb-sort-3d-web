@@ -7,13 +7,12 @@
  *  - Compression. A Brotli export needs `Content-Encoding: br`, which Pages
  *    cannot send, so the loader would die before the first frame. Any `.br`
  *    payload is expanded and `index.html` pointed at the plain names.
- *  - Layout. An export can ship either its own responsive layout or the stock
- *    template, which pins a fixed pixel play area on desktop and stretches the
- *    canvas across the whole viewport on phones. When the export already sizes
- *    itself (the current one fits a portrait 9:16 play area to the viewport and
- *    letterboxes it in landscape) it is left untouched; when it does not, both
- *    branches are replaced with one fit-to-screen rule that keeps the canvas
- *    aspect ratio, letterboxes, and centres it.
+ *  - Layout. The play area always fills the viewport. It previously kept a
+ *    fixed aspect ratio and letterboxed, which pillarboxed the game inside the
+ *    arcade shell (whose header and footer take height away) so the board sat in
+ *    a narrow column with empty space either side. The game's own camera refits
+ *    to whatever aspect it is handed, so stretching to the window is both correct
+ *    and far wider on screen.
  *
  *   node scripts/prepare-site.mjs
  *
@@ -78,15 +77,16 @@ function matchBrace(text, from) {
 
 /** One fit-to-screen rule for every device, replacing both template branches. */
 function fitScript(width, height) {
-  return `        // The play area is a fixed pixel size in the Unity template; scale it to
-        // whatever screen it is opened on so the whole board stays visible and
-        // nothing is stretched. Injected by scripts/prepare-site.mjs.
+  // width/height stay in the signature because callers pass the export's authored
+  // canvas size; the rule no longer depends on it.
+  void width
+  void height
+  return `        // The play area fills the viewport, width and height, with no letterboxing.
+        // The camera inside the game refits itself to the aspect it is given, so the
+        // board grows to use the whole window. Injected by scripts/prepare-site.mjs.
         var fitToWindow = function () {
-          var aspect = ${width} / ${height};
-          var width = Math.min(window.innerWidth, window.innerHeight * aspect);
-          var height = width / aspect;
-          fullscreenContainer.style.width = Math.floor(width) + "px";
-          fullscreenContainer.style.height = Math.floor(height) + "px";
+          fullscreenContainer.style.width = window.innerWidth + "px";
+          fullscreenContainer.style.height = window.innerHeight + "px";
         };
         document.querySelector("#unity-container").className = "unity-desktop";
         fitToWindow();
