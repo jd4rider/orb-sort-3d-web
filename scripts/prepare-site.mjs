@@ -19,6 +19,7 @@
  * `build/WebGL/` is the untouched Unity export. `site/` is generated and not
  * committed; CI rebuilds it on every push.
  */
+import { createHash } from 'node:crypto'
 import { brotliDecompressSync } from 'node:zlib'
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -138,6 +139,28 @@ async function main() {
   }
   html = html.replaceAll('.br"', '"')
 
+  // 2b. Version everything the loader caches.
+  //     Unity keeps the payload in IndexedDB (dataCaching) keyed by the data URL together with
+  //     company/product/version, so an unversioned export replays the first build a player ever
+  //     loaded and a new deploy simply never reaches them. A hash of the payload goes into both
+  //     the URL and productVersion: repeat visits stay cached, a real change always lands.
+  const payload = createHash('sha256')
+  for (const name of ['WebGL.data', 'WebGL.wasm', 'WebGL.framework.js', 'WebGL.loader.js']) {
+    payload.update(name)
+    payload.update(await readFile(join(buildDir, name)))
+  }
+  const revision = payload.digest('hex').slice(0, 12)
+
+  html = html.replace(
+    /buildUrl \+ "\/(WebGL\.(?:loader\.js|data|framework\.js|wasm))"/g,
+    (_, file) => `buildUrl + "/${file}?v=${revision}"`,
+  )
+  html = html.replace(/productVersion: "[^"]*"/, `productVersion: "${revision}"`)
+  if (!html.includes(`?v=${revision}`) || !html.includes(`productVersion: "${revision}"`)) {
+    throw new Error('could not version the loader URLs')
+  }
+  console.log(`build revision ${revision}`)
+
   // 3. Layout. An export that already sizes its own play area is used exactly as
   //    Unity generated it: re-fitting a portrait game to the old template's
   //    canvas size would squeeze it back into a landscape box.
@@ -192,6 +215,7 @@ async function main() {
     if (!info?.isFile()) throw new Error(`site/play/${file} is missing from the build`)
   }
   const loader = await readFile(join(play, 'index.html'), 'utf8')
+  if (!/WebGL\.data\?v=[0-9a-f]{12}/.test(loader)) throw new Error('site/play/index.html lost the cache-busting revision')
   if (loader.includes('.br"')) throw new Error('index.html still references compressed payload')
   if (hasOwnLayout) {
     if (!loader.includes('layoutCanvas')) throw new Error('site/play/index.html lost the responsive layout')
