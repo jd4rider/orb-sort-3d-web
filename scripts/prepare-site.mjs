@@ -29,6 +29,10 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const source = join(root, 'build/WebGL')
 const site = join(root, 'site')
 const play = join(site, 'play')
+const publicDir = join(root, 'public')
+
+/** Must match the public.games row and the manifest. */
+const GAME_ID = 'orb-sort-3d'
 
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
@@ -204,6 +208,33 @@ async function main() {
   </head>`,
     )
   }
+  // 4b. The arcade account layer. The drop-in client is copied next to the build and
+  //     its tag injected, so the game shares the signed-in session of the portal it is
+  //     embedded in. A Unity re-export replaces index.html, so this is also the step
+  //     that has to fail loudly if the tag goes missing.
+  const clientFrom = join(publicDir, 'arcade-client.js')
+  const clientInfo = await stat(clientFrom).catch(() => null)
+  if (!clientInfo?.isFile()) throw new Error('missing public/arcade-client.js')
+  await cp(clientFrom, join(play, 'arcade-client.js'))
+
+  const accountTag = `<script src="./arcade-client.js" data-game-id="${GAME_ID}"></script>`
+  if (!html.includes(accountTag)) {
+    if (!html.includes('</body>')) throw new Error('index.html has no </body> to inject the account tag before')
+    html = html.replace('</body>', `  ${accountTag}\n  </body>`)
+    // The client pins its account pill to the bottom-left, exactly where the Unity
+    // footer's logo sits; lift it clear of the footer.
+    if (!html.includes('[data-lja-client]')) {
+      html = html.replace(
+        '</head>',
+        `  <style>
+      [data-lja-client] { bottom: 46px !important; }
+    </style>
+  </head>`,
+      )
+    }
+  }
+  if (!html.includes(accountTag)) throw new Error('site/play/index.html is missing the account tag')
+
   await writeFile(indexPath, html)
 
   await writeFile(join(site, 'index.html'), LANDING)
